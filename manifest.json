@@ -5,9 +5,11 @@
   "display": "standalone",
   "background_color": "#000000",
   "description": "Преобразует изображение с камеры в звук и вибрацию.",
-  "icons": [{
-    "src": "icon.png",
-    "sizes": "192x192",
-    "type": "image/png"
-  }]
+  "icons": [
+    {
+      "src": "https://konstantingritsunov-lab.github.io/scanner/icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
 }
