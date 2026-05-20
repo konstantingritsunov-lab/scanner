@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Звуковой сканер — пианино, пресеты, доступность</title>
+<style>
+  body {
+    margin: 0; background: #000; font-family: sans-serif; color: #fff;
+    min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  }
+  video { display: none; }
+  canvas { display: block; width: 100vw; height: auto; max-height: 75vh; }
+  .settings-panel {
+    display: flex; flex-direction: column; align-items: center; gap: 0.8em;
+    padding: 1em; width: 100%; box-sizing: border-box; overflow-y: auto; max-height: 100vh;
+  }
+  .presets {
+    display: flex; flex-direction: column; width: 100%; gap: 0.5em; margin-bottom: 0.5em;
+  }
+  .presets button {
+    font-size: 1.2rem; padding: 0.6em 1em; background: #333; color: #fff;
+    border: 2px solid #555; border-radius: 0.8rem; cursor: pointer; text-align: left; width: 100%;
+    box-sizing: border-box;
+  }
+  .presets button.active { background: #fff; color: #000; border-color: #fff; }
+  button {
+    font-size: 1.2rem; padding: 0.5em 1em; background: #fff; color: #000;
+    border: none; border-radius: 0.8rem; min-width: 12em; cursor: pointer;
+  }
+  button:active { background: #ccc; }
+  .stop-btn { background: #ff4444; color: white; }
+  .voice-btn { background: #4CAF50; color: white; }
+  .voice-btn:disabled { background: #888; color: #ddd; }
+  .hint { font-size: 0.8rem; color: #ccc; text-align: center; max-width: 90vw; margin-top: 0.1em; }
+  .advanced {
+    display: none; flex-direction: column; align-items: center; gap: 0.6em;
+    width: 100%; margin-top: 0.5em;
+  }
+  .advanced.visible { display: flex; }
+  .row { display: flex; align-items: center; gap: 0.3em; }
+  hr { width: 80%; border: 1px solid #444; margin: 0.5em 0; }
+
+  #bottomControls {
+    display: none; justify-content: center; gap: 0.8em; flex-wrap: wrap;
+    padding: 0.5em 0 1em; width: 100%;
+  }
+
+  /* Информация об авторе в самом низу тонких настроек */
+  .author-info {
+    font-size: 0.7rem;
+    color: #888;
+    text-align: center;
+    margin-top: 0.5em;
+    border-top: 1px solid #333;
+    padding-top: 0.5em;
+    width: 100%;
+  }
+  .author-info a {
+    color: #aaa;
+    text-decoration: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="settingsPanel" class="settings-panel">
+  <div class="presets">
+    <button id="presetEasy" data-preset="easy" aria-label="Легкое: сетка 5 на 5, яркость">🌱 Легкое</button>
+    <button id="presetMedium" data-preset="medium" aria-label="Среднее: сетка 10 на 10, контраст">🔹 Среднее</button>
+    <button id="presetHard" data-preset="hard" aria-label="Сложное: сетка 10 на 10, цветной режим">🎨 Сложное</button>
+    <button id="presetVoice" data-preset="voice" aria-label="vOICe: звуковое зрение 48 на 48">🌀 vOICe</button>
+  </div>
+  <div class="hint">Выберите режим работы сканера</div>
+
+  <button id="startBtn" aria-label="Запустить сканер">▶ Запустить сканер</button>
+
+  <button id="toggleAdvancedBtn" aria-label="Показать или скрыть тонкие настройки" aria-expanded="false">⚙️ Тонкая настройка</button>
+
+  <div id="advancedPanel" class="advanced">
+    <hr>
+    <div class="option-block">
+      <button id="gridSizeBtn" aria-label="Изменить размер сетки">Размер сетки: 10×10</button>
+      <div class="hint">Чем больше клеток, тем детальнее картинка</div>
+    </div>
+    <div class="option-block">
+      <div class="row">
+        <span>Скорость:</span>
+        <button id="fpsMinus" aria-label="Уменьшить скорость">−</button>
+        <span id="fpsValue">10</span>
+        <button id="fpsPlus" aria-label="Увеличить скорость">+</button>
+        <span>кадров/с</span>
+      </div>
+      <div class="hint">Выше — чаще обновление, ниже — легче различать детали</div>
+    </div>
+    <div class="option-block">
+      <button id="modeBtn" aria-label="Переключить звуковой режим: яркость или цвет">Режим: Яркость</button>
+      <div class="hint">Яркость — один тон по свету. Цвет — аккорд RGB</div>
+    </div>
+    <div class="option-block">
+      <button id="framePauseBtn" aria-label="Включить или выключить паузу в начале кадра">Пауза в начале кадра: ВКЛ</button>
+      <div class="hint">Тишина перед каждым проходом — ощущение ритма</div>
+    </div>
+    <div class="option-block">
+      <button id="spatialBtn" aria-label="Включить или выключить пространственную окраску">Пространств. окраска: ВКЛ</button>
+      <div class="hint">Правее клетка — выше тон (лево-право)</div>
+    </div>
+    <div class="option-block">
+      <button id="analysisBtn" aria-label="Переключить анализ: яркость или контраст">Анализ: Яркость</button>
+      <div class="hint">Яркость — общая картина. Контраст — только границы и проёмы</div>
+    </div>
+    <div class="option-block">
+      <button id="voiceResBtn" aria-label="Изменить разрешение vOICe">vOICe разрешение: 48×48</button>
+      <div class="hint">Меньше разрешение — легче для телефона</div>
+    </div>
+    <div class="option-block">
+      <button id="timbreBtn" aria-label="Переключить тембр: синус или пианино">Тембр: Синус</button>
+      <div class="hint">Пианино — более богатый звук (может нагружать телефон)</div>
+    </div>
+
+    <!-- Информация об авторе (скрыта под катом) -->
+    <div class="author-info">
+      Автор: Грицунов Константин<br>
+      <a href="mailto:konstantingritsunov@yandex.ru">konstantingritsunov@yandex.ru</a>
+    </div>
+  </div>
+</div>
+
+<video id="vid" autoplay playsinline></video>
+<canvas id="cnv"></canvas>
+
+<div id="bottomControls">
+  <button id="invertBtn" aria-label="Переключить инверсию">🔄 Инверсия: ВЫКЛ</button>
+  <button id="voiceBtn" class="voice-btn" aria-label="Голосовая команда">🎤 Голосовая команда</button>
+  <button id="stopBtn" class="stop-btn" aria-label="Остановить и выключить камеру">⏹ Стоп</button>
+</div>
+
+<script>
+// ========== НАСТРОЙКИ И СОХРАНЕНИЕ ==========
+const SETTINGS_KEY = 'sound_scanner_settings';
+
+function loadSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY));
+    if (saved) {
+      if (saved.mode) mode = saved.mode;
+      if (saved.gridCols) gridCols = saved.gridCols;
+      if (saved.gridRows) gridRows = saved.gridRows;
+      if (saved.fps) fps = saved.fps;
+      if (saved.colorMode !== undefined) colorMode = saved.colorMode;
+      if (saved.framePause !== undefined) framePause = saved.framePause;
+      if (saved.spatialEnabled !== undefined) spatialEnabled = saved.spatialEnabled;
+      if (saved.analysisMode) analysisMode = saved.analysisMode;
+      if (saved.voiceRes) { voiceCols = saved.voiceRes; voiceRows = saved.voiceRes; }
+      if (saved.currentPreset) currentPreset = saved.currentPreset;
+      if (saved.timbre !== undefined) timbre = saved.timbre;
+    }
+  } catch(e) {}
+}
+
+function saveSettings() {
+  const s = {
+    mode: mode,
+    gridCols: gridCols,
+    gridRows: gridRows,
+    fps: fps,
+    colorMode: colorMode,
+    framePause: framePause,
+    spatialEnabled: spatialEnabled,
+    analysisMode: analysisMode,
+    voiceRes: voiceCols,
+    currentPreset: currentPreset,
+    timbre: timbre
+  };
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch(e) {}
+}
+
+// ========== ОСНОВНЫЕ ПЕРЕМЕННЫЕ ==========
+let mode = 'standard';
+let currentPreset = 'medium';
+
+let gridCols = 10, gridRows = 10, fps = 10;
+let colorMode = false, framePause = true, spatialEnabled = true;
+let analysisMode = 'brightness';
+let invertMode = false;
+let timbre = 'sine';
+
+let voiceCols = 48, voiceRows = 48;
+const VOICE_FPS = 1;
+const VOICE_FREQ_MIN = 200, VOICE_FREQ_MAX = 4000, VOICE_VOL = 0.35, VOICE_BRIGHT_MIN = 30;
+const VOICE_PAUSE = 0.15;
+
+const STD_FREQ_BASE = 200, STD_FREQ_TOP = 2000, STD_VOL = 0.4, STD_BRIGHT_MIN = 40;
+const STD_PAUSE = 0.1;
+const SAMPLE_RATE = 44100;
+const FRAME_SAFETY = 0.95;
+
+let audioCtx = null, stream = null, running = false, isProcessing = false, intervalId = null;
+let advancedOpen = false;
+
+// DOM
+const video = document.getElementById('vid');
+const canvas = document.getElementById('cnv');
+const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+const settingsPanel = document.getElementById('settingsPanel');
+const startBtn = document.getElementById('startBtn');
+const toggleAdvancedBtn = document.getElementById('toggleAdvancedBtn');
+const advancedPanel = document.getElementById('advancedPanel');
+
+const gridSizeBtn = document.getElementById('gridSizeBtn');
+const fpsMinus = document.getElementById('fpsMinus'), fpsPlus = document.getElementById('fpsPlus'), fpsValue = document.getElementById('fpsValue');
+const modeBtn = document.getElementById('modeBtn'), framePauseBtn = document.getElementById('framePauseBtn');
+const spatialBtn = document.getElementById('spatialBtn'), analysisBtn = document.getElementById('analysisBtn');
+const voiceResBtn = document.getElementById('voiceResBtn');
+const timbreBtn = document.getElementById('timbreBtn');
+const invertBtn = document.getElementById('invertBtn');
+const voiceBtn = document.getElementById('voiceBtn');
+const stopBtn = document.getElementById('stopBtn');
+const bottomControls = document.getElementById('bottomControls');
+
+const presetButtons = {
+  easy: document.getElementById('presetEasy'),
+  medium: document.getElementById('presetMedium'),
+  hard: document.getElementById('presetHard'),
+  voice: document.getElementById('presetVoice')
+};
+
+// ========== ПРИМЕНЕНИЕ ПРЕСЕТОВ ==========
+function applyPreset(preset) {
+  currentPreset = preset;
+  switch(preset) {
+    case 'easy':
+      mode = 'standard';
+      gridCols = 5; gridRows = 5;
+      fps = 10;
+      colorMode = false;
+      analysisMode = 'brightness';
+      spatialEnabled = true;
+      framePause = true;
+      break;
+    case 'medium':
+      mode = 'standard';
+      gridCols = 10; gridRows = 10;
+      fps = 10;
+      colorMode = false;
+      analysisMode = 'contrast';
+      spatialEnabled = true;
+      framePause = true;
+      break;
+    case 'hard':
+      mode = 'standard';
+      gridCols = 10; gridRows = 10;
+      fps = 10;
+      colorMode = true;
+      analysisMode = 'brightness';
+      spatialEnabled = true;
+      framePause = true;
+      break;
+    case 'voice':
+      mode = 'voice';
+      voiceCols = 48; voiceRows = 48;
+      fps = 1;
+      colorMode = false;
+      analysisMode = 'brightness';
+      spatialEnabled = true;
+      framePause = true;
+      break;
+  }
+  Object.keys(presetButtons).forEach(key => {
+    const btn = presetButtons[key];
+    if (key === preset) btn.classList.add('active');
+    else btn.classList.remove('active');
+  });
+  updateUI();
+  saveSettings();
+}
+
+presetButtons.easy.addEventListener('click', () => applyPreset('easy'));
+presetButtons.medium.addEventListener('click', () => applyPreset('medium'));
+presetButtons.hard.addEventListener('click', () => applyPreset('hard'));
+presetButtons.voice.addEventListener('click', () => applyPreset('voice'));
+
+function updateUI() {
+  gridSizeBtn.textContent = `Размер сетки: ${gridCols}×${gridRows}`;
+  fpsValue.textContent = (mode === 'voice') ? 1 : fps;
+  modeBtn.textContent = colorMode ? 'Режим: Цвет' : 'Режим: Яркость';
+  framePauseBtn.textContent = framePause ? 'Пауза в начале кадра: ВКЛ' : 'Пауза в начале кадра: ВЫКЛ';
+  spatialBtn.textContent = spatialEnabled ? 'Пространств. окраска: ВКЛ' : 'Пространств. окраска: ВЫКЛ';
+  analysisBtn.textContent = `Анализ: ${analysisMode === 'brightness' ? 'Яркость' : 'Контраст'}`;
+  voiceResBtn.textContent = `vOICe разрешение: ${voiceCols}×${voiceRows}`;
+  timbreBtn.textContent = timbre === 'sine' ? 'Тембр: Синус' : 'Тембр: Пианино';
+}
+
+// ========== ГОЛОСОВОЕ УПРАВЛЕНИЕ ==========
+let recognition = null, micAvailable = false;
+try {
+  recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+  recognition.lang = 'ru-RU';
+  recognition.continuous = false;
+  recognition.interimResults = false;
+  micAvailable = true;
+} catch(e) { micAvailable = false; }
+
+if (micAvailable) {
+  recognition.onresult = (event) => {
+    const cmd = event.results[0][0].transcript.toLowerCase().trim();
+    if (cmd.includes('стоп') || cmd.includes('выключи')) {
+      fullStop();
+    } else if (cmd.includes('инверсия')) {
+      invertBtn.click();
+    } else if (cmd.includes('режим') || cmd.includes('пресет')) {
+      if (cmd.includes('легк') || cmd.includes('просто')) applyPreset('easy');
+      else if (cmd.includes('средн') || cmd.includes('обычн')) applyPreset('medium');
+      else if (cmd.includes('сложн') || cmd.includes('цветн')) applyPreset('hard');
+      else if (cmd.includes('войс') || cmd.includes('воис')) applyPreset('voice');
+    } else if (cmd.includes('сетка')) {
+      gridSizeBtn.click();
+    } else if (cmd.includes('скорость') || cmd.includes('кадр')) {
+      const num = parseInt(cmd.replace(/[^0-9]/g, ''));
+      if (num >= 1 && num <= 20) { fps = num; fpsValue.textContent = num; saveSettings(); }
+    } else if (cmd.includes('пауз')) {
+      framePauseBtn.click();
+    } else if (cmd.includes('окрас')) {
+      spatialBtn.click();
+    } else if (cmd.includes('анализ') || cmd.includes('контраст') || cmd.includes('яркость')) {
+      analysisBtn.click();
+    } else if (cmd.includes('цвет')) {
+      modeBtn.click();
+    } else if (cmd.includes('разрешение') || cmd.includes('детализация')) {
+      voiceResBtn.click();
+    } else if (cmd.includes('тембр') || cmd.includes('пианин')) {
+      timbreBtn.click();
+    }
+  };
+  recognition.onerror = () => { if (running) setTimeout(() => { try { recognition.start(); } catch(e) {} }, 1000); };
+  recognition.onend = () => { if (running) try { recognition.start(); } catch(e) {} };
+}
+
+voiceBtn.addEventListener('click', () => {
+  if (!micAvailable) {
+    alert('Микрофон недоступен. Для голосового управления откройте страницу через HTTPS.');
+    return;
+  }
+  try {
+    recognition.start();
+    voiceBtn.textContent = '🎤 Говорите...';
+    setTimeout(() => { voiceBtn.textContent = '🎤 Голосовая команда'; }, 3000);
+  } catch(e) { alert('Не удалось запустить микрофон. Проверьте разрешения.'); }
+});
+
+if (!micAvailable) {
+  voiceBtn.textContent = '🎤 Микрофон недоступен';
+  voiceBtn.disabled = false;
+}
+
+// ========== ВИБРО ==========
+function vibrateByBrightness(brightness) {
+  if (navigator.vibrate) {
+    if (brightness > 200) navigator.vibrate([100, 50, 100]);
+    else if (brightness > 100) navigator.vibrate([50, 50, 50]);
+    else if (brightness > 40) navigator.vibrate([20]);
+    else navigator.vibrate(0);
+  }
+}
+
+function fullStop() {
+  running = false;
+  if (intervalId) { clearInterval(intervalId); intervalId = null; }
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  video.srcObject = null;
+  settingsPanel.style.display = 'flex';
+  bottomControls.style.display = 'none';
+  canvas.style.display = 'none';
+  isProcessing = false;
+  if (recognition && micAvailable) { try { recognition.abort(); } catch(e) {} }
+}
+stopBtn.addEventListener('click', fullStop);
+
+toggleAdvancedBtn.addEventListener('click', () => {
+  advancedOpen = !advancedOpen;
+  advancedPanel.classList.toggle('visible', advancedOpen);
+  toggleAdvancedBtn.setAttribute('aria-expanded', advancedOpen);
+});
+
+gridSizeBtn.addEventListener('click', () => {
+  if (gridCols === 10 && gridRows === 10) { gridCols = 20; gridRows = 20; }
+  else if (gridCols === 20 && gridRows === 20) { gridCols = 5; gridRows = 5; }
+  else { gridCols = 10; gridRows = 10; }
+  updateUI(); saveSettings();
+});
+
+fpsMinus.addEventListener('click', () => { if (fps > 1) { fps--; } updateUI(); saveSettings(); });
+fpsPlus.addEventListener('click', () => { if (fps < 20) { fps++; } updateUI(); saveSettings(); });
+
+modeBtn.addEventListener('click', () => { colorMode = !colorMode; updateUI(); saveSettings(); });
+framePauseBtn.addEventListener('click', () => { framePause = !framePause; updateUI(); saveSettings(); });
+spatialBtn.addEventListener('click', () => { spatialEnabled = !spatialEnabled; updateUI(); saveSettings(); });
+analysisBtn.addEventListener('click', () => {
+  analysisMode = analysisMode === 'brightness' ? 'contrast' : 'brightness';
+  updateUI(); saveSettings();
+});
+
+invertBtn.addEventListener('click', () => {
+  invertMode = !invertMode;
+  invertBtn.textContent = invertMode ? '🔄 Инверсия: ВКЛ' : '🔄 Инверсия: ВЫКЛ';
+});
+
+voiceResBtn.addEventListener('click', () => {
+  if (voiceCols === 32) { voiceCols = 48; voiceRows = 48; }
+  else if (voiceCols === 48) { voiceCols = 64; voiceRows = 64; }
+  else { voiceCols = 32; voiceRows = 32; }
+  updateUI(); saveSettings();
+});
+
+timbreBtn.addEventListener('click', () => {
+  timbre = timbre === 'sine' ? 'piano' : 'sine';
+  updateUI();
+  saveSettings();
+});
+
+startBtn.addEventListener('click', async () => {
+  settingsPanel.style.display = 'none';
+  bottomControls.style.display = 'flex';
+  canvas.style.display = 'block';
+
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 320 }, height: { ideal: 240 } },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+  } catch(e) { alert('Нет доступа к камере'); fullStop(); return; }
+
+  video.addEventListener('loadedmetadata', () => {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.style.width = '100vw';
+    canvas.style.height = 'auto';
+    canvas.style.maxHeight = '75vh';
+  });
+
+  running = true;
+  const fpsActual = mode === 'standard' ? fps : VOICE_FPS;
+  intervalId = setInterval(() => {
+    if (!isProcessing) {
+      mode === 'standard' ? processStandard() : processVOICE();
+    }
+  }, 1000 / fpsActual);
+});
+
+function drawGrid(cols, rows) {
+  const w = canvas.width, h = canvas.height;
+  const cellW = w / cols, cellH = h / rows;
+  ctx.strokeStyle = '#00FF00'; ctx.lineWidth = 2;
+  for (let i = 1; i < cols; i++) { const x = Math.floor(i * cellW); ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+  for (let i = 1; i < rows; i++) { const y = Math.floor(i * cellH); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+}
+
+function pianoSample(t, freq) {
+  const s1 = Math.sin(2 * Math.PI * freq * t);
+  const s2 = Math.sin(2 * Math.PI * freq * 2 * t) * 0.5;
+  const s3 = Math.sin(2 * Math.PI * freq * 3 * t) * 0.25;
+  return (s1 + s2 + s3) / 1.75;
+}
+
+function processStandard() {
+  if (!running || !audioCtx) return;
+  isProcessing = true;
+  const w = canvas.width, h = canvas.height;
+  ctx.drawImage(video, 0, 0, w, h);
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const pixels = imgData.data;
+  drawGrid(gridCols, gridRows);
+
+  const frameDuration = 1 / fps;
+  let pauseDuration = framePause ? STD_PAUSE : 0;
+  if (pauseDuration > frameDuration * 0.2) pauseDuration = frameDuration * 0.2;
+  const pauseSamples = Math.floor(SAMPLE_RATE * pauseDuration);
+  const usefulTime = (frameDuration - pauseDuration) * FRAME_SAFETY;
+  const rowDuration = Math.max(0.001, usefulTime / gridRows);
+  const samplesPerRow = Math.floor(SAMPLE_RATE * rowDuration);
+  const samplesPerCell = Math.max(1, Math.floor(samplesPerRow / gridCols));
+  const totalSamples = pauseSamples + gridRows * samplesPerRow;
+  const buffer = new Float32Array(totalSamples);
+  let idx = pauseSamples;
+
+  const cellW = Math.floor(w / gridCols), cellH = Math.floor(h / gridRows);
+  let cells = [];
+  for (let row = 0; row < gridRows; row++) {
+    cells[row] = [];
+    const y1 = row * cellH, y2 = (row === gridRows-1) ? h : y1+cellH;
+    for (let col = 0; col < gridCols; col++) {
+      const x1 = col * cellW, x2 = (col === gridCols-1) ? w : x1+cellW;
+      let sum = 0, cnt = 0;
+      for (let y = y1; y < y2; y++) {
+        for (let x = x1; x < x2; x++) {
+          const i = (y*w + x)*4;
+          let bright = (pixels[i] + pixels[i+1] + pixels[i+2]) / 3;
+          if (invertMode) bright = 255 - bright;
+          sum += bright; cnt++;
+        }
+      }
+      cells[row][col] = sum / cnt;
+    }
+  }
+
+  let totalBright = 0, brightCnt = 0;
+  for (let row = 0; row < gridRows; row++) {
+    for (let col = 0; col < gridCols; col++) {
+      totalBright += cells[row][col];
+      brightCnt++;
+    }
+  }
+  vibrateByBrightness(totalBright / brightCnt);
+
+  const attack = Math.max(1, Math.floor(0.0005 * SAMPLE_RATE));
+  const release = Math.max(1, Math.floor(0.001 * SAMPLE_RATE));
+  for (let row = 0; row < gridRows; row++) {
+    for (let col = 0; col < gridCols; col++) {
+      let val;
+      if (colorMode || analysisMode === 'brightness') val = cells[row][col];
+      else {
+        val = (col === 0) ? Math.abs(cells[row][0] - cells[row][1]) : Math.abs(cells[row][col] - cells[row][col-1]);
+        val = Math.min(255, val * 2);
+      }
+
+      if (val < STD_BRIGHT_MIN) {
+        for (let i = 0; i < samplesPerCell; i++) buffer[idx++] = (Math.random()*2-1)*0.02;
+      } else {
+        let freq = STD_FREQ_BASE + (val/255)*(STD_FREQ_TOP-STD_FREQ_BASE);
+        if (spatialEnabled) freq = Math.min(freq + (col/(gridCols-1))*400, STD_FREQ_TOP+400);
+        const vol = (val/255)*STD_VOL;
+        for (let i = 0; i < samplesPerCell; i++) {
+          const t = i/SAMPLE_RATE;
+          let s = (timbre === 'piano') ? pianoSample(t, freq) : Math.sin(2*Math.PI*freq*t);
+          if (i < attack) s *= i/attack;
+          else if (i >= samplesPerCell - release) s *= 1 - (i - (samplesPerCell - release))/release;
+          buffer[idx++] = s*vol*0.8;
+        }
+      }
+    }
+  }
+
+  const audioBuffer = audioCtx.createBuffer(1, totalSamples, SAMPLE_RATE);
+  audioBuffer.getChannelData(0).set(buffer);
+  const source = audioCtx.createBufferSource();
+  source.buffer = audioBuffer; source.connect(audioCtx.destination);
+  source.start(audioCtx.currentTime + 0.001);
+  isProcessing = false;
+}
+
+function processVOICE() {
+  if (!running || !audioCtx) return;
+  isProcessing = true;
+  const w = canvas.width, h = canvas.height;
+  ctx.drawImage(video, 0, 0, w, h);
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const pixels = imgData.data;
+  drawGrid(voiceCols, voiceRows);
+
+  const frameDuration = 1.0;
+  const pauseSamples = Math.floor(SAMPLE_RATE * Math.min(VOICE_PAUSE, frameDuration * 0.2));
+  const usefulTime = frameDuration - VOICE_PAUSE;
+  const colDuration = usefulTime / voiceCols;
+  const samplesPerCol = Math.floor(SAMPLE_RATE * colDuration);
+  const totalSamples = pauseSamples + voiceCols * samplesPerCol;
+  const buffer = new Float32Array(totalSamples);
+  let idx = pauseSamples;
+
+  const cellW = Math.floor(w / voiceCols), cellH = Math.floor(h / voiceRows);
+  let cells = [];
+  for (let row = 0; row < voiceRows; row++) {
+    cells[row] = [];
+    const y1 = row * cellH, y2 = (row === voiceRows-1) ? h : y1+cellH;
+    for (let col = 0; col < voiceCols; col++) {
+      const x1 = col * cellW, x2 = (col === voiceCols-1) ? w : x1+cellW;
+      let sum = 0, cnt = 0;
+      for (let y = y1; y < y2; y++) {
+        for (let x = x1; x < x2; x++) {
+          const i = (y*w + x)*4;
+          let bright = (pixels[i] + pixels[i+1] + pixels[i+2]) / 3;
+          if (invertMode) bright = 255 - bright;
+          sum += bright; cnt++;
+        }
+      }
+      cells[row][col] = sum / cnt;
+    }
+  }
+
+  let totalBright = 0, brightCnt = 0;
+  for (let row = 0; row < voiceRows; row++) {
+    for (let col = 0; col < voiceCols; col++) {
+      totalBright += cells[row][col];
+      brightCnt++;
+    }
+  }
+  vibrateByBrightness(totalBright / brightCnt);
+
+  const rowFreqs = Array.from({length: voiceRows}, (_, r) =>
+    VOICE_FREQ_MIN + (VOICE_FREQ_MAX - VOICE_FREQ_MIN) * (r / (voiceRows-1))
+  );
+
+  for (let col = 0; col < voiceCols; col++) {
+    const baseIdx = idx;
+    for (let i = 0; i < samplesPerCol; i++) {
+      const t = i / SAMPLE_RATE;
+      let sample = 0;
+      for (let row = 0; row < voiceRows; row++) {
+        const bright = cells[row][col];
+        if (bright < VOICE_BRIGHT_MIN) continue;
+        const amp = (bright / 255) * VOICE_VOL / voiceRows;
+        sample += Math.sin(2 * Math.PI * rowFreqs[row] * t) * amp;
+      }
+      const fade = Math.min(30, samplesPerCol/4);
+      let envelope = 1;
+      if (i < fade) envelope = i / fade;
+      else if (i >= samplesPerCol - fade) envelope = (samplesPerCol - i) / fade;
+      buffer[baseIdx + i] = sample * envelope;
+    }
+    idx += samplesPerCol;
+  }
+
+  const audioBuffer = audioCtx.createBuffer(1, totalSamples, SAMPLE_RATE);
+  audioBuffer.getChannelData(0).set(buffer);
+  const source = audioCtx.createBufferSource();
+  source.buffer = audioBuffer; source.connect(audioCtx.destination);
+  source.start(audioCtx.currentTime + 0.001);
+  isProcessing = false;
+}
+
+window.addEventListener('load', () => {
+  setTimeout(() => {
+    startBtn.focus();
+  }, 500);
+});
+
+loadSettings();
+applyPreset(currentPreset);
+window.addEventListener('beforeunload', () => fullStop());
+</script>
+</body>
+</html>
