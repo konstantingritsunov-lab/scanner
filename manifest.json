@@ -1,0 +1,13 @@
+{
+  "name": "Звуковой сканер",
+  "short_name": "Сканер",
+  "start_url": "scanner.html",
+  "display": "standalone",
+  "background_color": "#000000",
+  "description": "Преобразует изображение с камеры в звук и вибрацию.",
+  "icons": [{
+    "src": "icon.png",
+    "sizes": "192x192",
+    "type": "image/png"
+  }]
+}
