@@ -16,9 +16,7 @@
     display: flex; flex-direction: column; align-items: center; gap: 0.8em;
     padding: 1em; width: 100%; box-sizing: border-box; overflow-y: auto; max-height: 100vh;
   }
-  .presets {
-    display: flex; flex-direction: column; width: 100%; gap: 0.5em; margin-bottom: 0.5em;
-  }
+  .presets { display: flex; flex-direction: column; width: 100%; gap: 0.5em; margin-bottom: 0.5em; }
   .presets button {
     font-size: 1.2rem; padding: 0.6em 1em; background: #333; color: #fff;
     border: 2px solid #555; border-radius: 0.8rem; cursor: pointer; text-align: left; width: 100%;
@@ -34,33 +32,19 @@
   .voice-btn { background: #4CAF50; color: white; }
   .voice-btn:disabled { background: #888; color: #ddd; }
   .hint { font-size: 0.8rem; color: #ccc; text-align: center; max-width: 90vw; margin-top: 0.1em; }
-  .advanced {
-    display: none; flex-direction: column; align-items: center; gap: 0.6em;
-    width: 100%; margin-top: 0.5em;
-  }
+  .advanced { display: none; flex-direction: column; align-items: center; gap: 0.6em; width: 100%; margin-top: 0.5em; }
   .advanced.visible { display: flex; }
   .row { display: flex; align-items: center; gap: 0.3em; }
   hr { width: 80%; border: 1px solid #444; margin: 0.5em 0; }
-
   #bottomControls {
     display: none; justify-content: center; gap: 0.8em; flex-wrap: wrap;
     padding: 0.5em 0 1em; width: 100%;
   }
-
-  /* Информация об авторе в самом низу тонких настроек */
   .author-info {
-    font-size: 0.7rem;
-    color: #888;
-    text-align: center;
-    margin-top: 0.5em;
-    border-top: 1px solid #333;
-    padding-top: 0.5em;
-    width: 100%;
+    font-size: 0.7rem; color: #888; text-align: center;
+    margin-top: 0.5em; border-top: 1px solid #333; padding-top: 0.5em; width: 100%;
   }
-  .author-info a {
-    color: #aaa;
-    text-decoration: none;
-  }
+  .author-info a { color: #aaa; text-decoration: none; }
 </style>
 </head>
 <body>
@@ -75,7 +59,6 @@
   <div class="hint">Выберите режим работы сканера</div>
 
   <button id="startBtn" aria-label="Запустить сканер">▶ Запустить сканер</button>
-
   <button id="toggleAdvancedBtn" aria-label="Показать или скрыть тонкие настройки" aria-expanded="false">⚙️ Тонкая настройка</button>
 
   <div id="advancedPanel" class="advanced">
@@ -86,9 +69,9 @@
     </div>
     <div class="option-block">
       <div class="row">
-        <span>Скорость:</span>
+        <span>Скорость звука:</span>
         <button id="fpsMinus" aria-label="Уменьшить скорость">−</button>
-        <span id="fpsValue">10</span>
+        <span id="fpsValue">1</span>
         <button id="fpsPlus" aria-label="Увеличить скорость">+</button>
         <span>кадров/с</span>
       </div>
@@ -119,7 +102,6 @@
       <div class="hint">Пианино — более богатый звук (может нагружать телефон)</div>
     </div>
 
-    <!-- Информация об авторе (скрыта под катом) -->
     <div class="author-info">
       Автор: Грицунов Константин<br>
       <a href="mailto:konstantingritsunov@yandex.ru">konstantingritsunov@yandex.ru</a>
@@ -127,7 +109,7 @@
   </div>
 </div>
 
-<video id="vid" autoplay playsinline></video>
+<video id="vid" autoplay playsinline muted></video>
 <canvas id="cnv"></canvas>
 
 <div id="bottomControls">
@@ -138,7 +120,7 @@
 
 <script>
 // ========== НАСТРОЙКИ И СОХРАНЕНИЕ ==========
-const SETTINGS_KEY = 'sound_scanner_settings';
+const SETTINGS_KEY = 'sound_scanner_settings_v2';
 
 function loadSettings() {
   try {
@@ -161,17 +143,9 @@ function loadSettings() {
 
 function saveSettings() {
   const s = {
-    mode: mode,
-    gridCols: gridCols,
-    gridRows: gridRows,
-    fps: fps,
-    colorMode: colorMode,
-    framePause: framePause,
-    spatialEnabled: spatialEnabled,
-    analysisMode: analysisMode,
-    voiceRes: voiceCols,
-    currentPreset: currentPreset,
-    timbre: timbre
+    mode: mode, gridCols: gridCols, gridRows: gridRows, fps: fps,
+    colorMode: colorMode, framePause: framePause, spatialEnabled: spatialEnabled,
+    analysisMode: analysisMode, voiceRes: voiceCols, currentPreset: currentPreset, timbre: timbre
   };
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch(e) {}
 }
@@ -180,7 +154,8 @@ function saveSettings() {
 let mode = 'standard';
 let currentPreset = 'medium';
 
-let gridCols = 10, gridRows = 10, fps = 10;
+// скорость звука по умолчанию — 1 кадр/с (для слабых телефонов)
+let gridCols = 10, gridRows = 10, fps = 1;
 let colorMode = false, framePause = true, spatialEnabled = true;
 let analysisMode = 'brightness';
 let invertMode = false;
@@ -196,13 +171,30 @@ const STD_PAUSE = 0.1;
 const SAMPLE_RATE = 44100;
 const FRAME_SAFETY = 0.95;
 
+// Превью (видео-картинка) обновляется независимо от звука — плавно, ~15 раз/сек
+const PREVIEW_FPS = 15;
+let lastPreviewTime = 0;
+
 let audioCtx = null, stream = null, running = false, isProcessing = false, intervalId = null;
+let rafId = null;
+let activeSource = null;
+let playState = null;
 let advancedOpen = false;
 
 // DOM
 const video = document.getElementById('vid');
 const canvas = document.getElementById('cnv');
-const ctx = canvas.getContext('2d', { willReadFrequently: true });
+const ctx = canvas.getContext('2d');
+
+// Оффскрин: сюда кладём видео + сетку для показа
+const bgCanvas = document.createElement('canvas');
+const bgCtx = bgCanvas.getContext('2d', { willReadFrequently: false });
+
+// Оффскрин для БЫСТРОГО анализа: уменьшаем видео сразу до размера сетки
+const smallCanvas = document.createElement('canvas');
+const smallCtx = smallCanvas.getContext('2d', { willReadFrequently: true });
+smallCtx.imageSmoothingEnabled = true;
+smallCtx.imageSmoothingQuality = 'high';
 
 const settingsPanel = document.getElementById('settingsPanel');
 const startBtn = document.getElementById('startBtn');
@@ -232,41 +224,21 @@ function applyPreset(preset) {
   currentPreset = preset;
   switch(preset) {
     case 'easy':
-      mode = 'standard';
-      gridCols = 5; gridRows = 5;
-      fps = 10;
-      colorMode = false;
-      analysisMode = 'brightness';
-      spatialEnabled = true;
-      framePause = true;
-      break;
+      mode = 'standard'; gridCols = 5; gridRows = 5; fps = 1;
+      colorMode = false; analysisMode = 'brightness';
+      spatialEnabled = true; framePause = true; break;
     case 'medium':
-      mode = 'standard';
-      gridCols = 10; gridRows = 10;
-      fps = 10;
-      colorMode = false;
-      analysisMode = 'contrast';
-      spatialEnabled = true;
-      framePause = true;
-      break;
+      mode = 'standard'; gridCols = 10; gridRows = 10; fps = 1;
+      colorMode = false; analysisMode = 'contrast';
+      spatialEnabled = true; framePause = true; break;
     case 'hard':
-      mode = 'standard';
-      gridCols = 10; gridRows = 10;
-      fps = 10;
-      colorMode = true;
-      analysisMode = 'brightness';
-      spatialEnabled = true;
-      framePause = true;
-      break;
+      mode = 'standard'; gridCols = 10; gridRows = 10; fps = 1;
+      colorMode = true; analysisMode = 'brightness';
+      spatialEnabled = true; framePause = true; break;
     case 'voice':
-      mode = 'voice';
-      voiceCols = 48; voiceRows = 48;
-      fps = 1;
-      colorMode = false;
-      analysisMode = 'brightness';
-      spatialEnabled = true;
-      framePause = true;
-      break;
+      mode = 'voice'; voiceCols = 48; voiceRows = 48; fps = 1;
+      colorMode = false; analysisMode = 'brightness';
+      spatialEnabled = true; framePause = true; break;
   }
   Object.keys(presetButtons).forEach(key => {
     const btn = presetButtons[key];
@@ -306,33 +278,23 @@ try {
 if (micAvailable) {
   recognition.onresult = (event) => {
     const cmd = event.results[0][0].transcript.toLowerCase().trim();
-    if (cmd.includes('стоп') || cmd.includes('выключи')) {
-      fullStop();
-    } else if (cmd.includes('инверсия')) {
-      invertBtn.click();
-    } else if (cmd.includes('режим') || cmd.includes('пресет')) {
+    if (cmd.includes('стоп') || cmd.includes('выключи')) fullStop();
+    else if (cmd.includes('инверсия')) invertBtn.click();
+    else if (cmd.includes('режим') || cmd.includes('пресет')) {
       if (cmd.includes('легк') || cmd.includes('просто')) applyPreset('easy');
       else if (cmd.includes('средн') || cmd.includes('обычн')) applyPreset('medium');
       else if (cmd.includes('сложн') || cmd.includes('цветн')) applyPreset('hard');
       else if (cmd.includes('войс') || cmd.includes('воис')) applyPreset('voice');
-    } else if (cmd.includes('сетка')) {
-      gridSizeBtn.click();
-    } else if (cmd.includes('скорость') || cmd.includes('кадр')) {
+    } else if (cmd.includes('сетка')) gridSizeBtn.click();
+    else if (cmd.includes('скорость') || cmd.includes('кадр')) {
       const num = parseInt(cmd.replace(/[^0-9]/g, ''));
       if (num >= 1 && num <= 20) { fps = num; fpsValue.textContent = num; saveSettings(); }
-    } else if (cmd.includes('пауз')) {
-      framePauseBtn.click();
-    } else if (cmd.includes('окрас')) {
-      spatialBtn.click();
-    } else if (cmd.includes('анализ') || cmd.includes('контраст') || cmd.includes('яркость')) {
-      analysisBtn.click();
-    } else if (cmd.includes('цвет')) {
-      modeBtn.click();
-    } else if (cmd.includes('разрешение') || cmd.includes('детализация')) {
-      voiceResBtn.click();
-    } else if (cmd.includes('тембр') || cmd.includes('пианин')) {
-      timbreBtn.click();
-    }
+    } else if (cmd.includes('пауз')) framePauseBtn.click();
+    else if (cmd.includes('окрас')) spatialBtn.click();
+    else if (cmd.includes('анализ') || cmd.includes('контраст') || cmd.includes('яркость')) analysisBtn.click();
+    else if (cmd.includes('цвет')) modeBtn.click();
+    else if (cmd.includes('разрешение') || cmd.includes('детализация')) voiceResBtn.click();
+    else if (cmd.includes('тембр') || cmd.includes('пианин')) timbreBtn.click();
   };
   recognition.onerror = () => { if (running) setTimeout(() => { try { recognition.start(); } catch(e) {} }, 1000); };
   recognition.onend = () => { if (running) try { recognition.start(); } catch(e) {} };
@@ -365,20 +327,62 @@ function vibrateByBrightness(brightness) {
   }
 }
 
+// ========== ПОЛНЫЙ СТОП + ОТПУСКАНИЕ КАМЕРЫ ==========
 function fullStop() {
   running = false;
+
   if (intervalId) { clearInterval(intervalId); intervalId = null; }
-  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-  if (audioCtx) { audioCtx.close(); audioCtx = null; }
-  video.srcObject = null;
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+
+  if (activeSource) {
+    try { activeSource.stop(); } catch(e) {}
+    try { activeSource.disconnect(); } catch(e) {}
+    activeSource = null;
+  }
+
+  if (stream) {
+    try {
+      stream.getTracks().forEach(t => { try { t.stop(); } catch(e) {} });
+      if (stream.getVideoTracks) stream.getVideoTracks().forEach(t => { try { t.stop(); } catch(e) {} });
+    } catch(e) {}
+    stream = null;
+  }
+
+  if (video) {
+    try { video.pause(); } catch(e) {}
+    try { video.srcObject = null; } catch(e) {}
+    try { video.removeAttribute('src'); } catch(e) {}
+    try { video.load(); } catch(e) {}
+  }
+
+  if (audioCtx) {
+    try { audioCtx.close(); } catch(e) {}
+    audioCtx = null;
+  }
+
+  playState = null;
+  isProcessing = false;
+  lastPreviewTime = 0;
+
+  try { bgCtx.clearRect(0, 0, bgCanvas.width, bgCanvas.height); } catch(e) {}
+  try { ctx.clearRect(0, 0, canvas.width, canvas.height); } catch(e) {}
+
   settingsPanel.style.display = 'flex';
   bottomControls.style.display = 'none';
   canvas.style.display = 'none';
-  isProcessing = false;
+
   if (recognition && micAvailable) { try { recognition.abort(); } catch(e) {} }
 }
+
 stopBtn.addEventListener('click', fullStop);
 
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && running) fullStop();
+});
+window.addEventListener('pagehide', () => fullStop());
+window.addEventListener('beforeunload', () => fullStop());
+
+// ========== ТОНКИЕ НАСТРОЙКИ ==========
 toggleAdvancedBtn.addEventListener('click', () => {
   advancedOpen = !advancedOpen;
   advancedPanel.classList.toggle('visible', advancedOpen);
@@ -417,11 +421,13 @@ voiceResBtn.addEventListener('click', () => {
 
 timbreBtn.addEventListener('click', () => {
   timbre = timbre === 'sine' ? 'piano' : 'sine';
-  updateUI();
-  saveSettings();
+  updateUI(); saveSettings();
 });
 
+// ========== ЗАПУСК ==========
 startBtn.addEventListener('click', async () => {
+  if (running) return;
+
   settingsPanel.style.display = 'none';
   bottomControls.style.display = 'flex';
   canvas.style.display = 'block';
@@ -436,17 +442,15 @@ startBtn.addEventListener('click', async () => {
     });
     video.srcObject = stream;
     await video.play();
-  } catch(e) { alert('Нет доступа к камере'); fullStop(); return; }
-
-  video.addEventListener('loadedmetadata', () => {
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.style.width = '100vw';
-    canvas.style.height = 'auto';
-    canvas.style.maxHeight = '75vh';
-  });
+  } catch(e) {
+    alert('Нет доступа к камере');
+    fullStop();
+    return;
+  }
 
   running = true;
+  startRenderLoop();
+
   const fpsActual = mode === 'standard' ? fps : VOICE_FPS;
   intervalId = setInterval(() => {
     if (!isProcessing) {
@@ -455,12 +459,127 @@ startBtn.addEventListener('click', async () => {
   }, 1000 / fpsActual);
 });
 
-function drawGrid(cols, rows) {
+video.addEventListener('loadedmetadata', () => {
+  const w = video.videoWidth  || 320;
+  const h = video.videoHeight || 240;
+  canvas.width = w;
+  canvas.height = h;
+  bgCanvas.width = w;
+  bgCanvas.height = h;
+  canvas.style.width = '100vw';
+  canvas.style.height = 'auto';
+  canvas.style.maxHeight = '75vh';
+});
+
+// ========== ЦИКЛ ОТРИСОВКИ ==========
+// Превью (видео + сетка) обновляется PREVIEW_FPS раз в секунду — НЕЗАВИСИМО от звука.
+// Подсветка текущей клетки — на каждом кадре экрана (60fps), плавно.
+function startRenderLoop() {
+  if (rafId) return;
+  const loop = () => {
+    if (!running) { rafId = null; return; }
+    renderFrame();
+    rafId = requestAnimationFrame(loop);
+  };
+  rafId = requestAnimationFrame(loop);
+}
+
+function renderFrame() {
   const w = canvas.width, h = canvas.height;
+  if (!w || !h) return;
+
+  // Обновляем «фотографию» видео в bgCanvas только PREVIEW_FPS раз/сек — этого достаточно,
+  // чтобы картинка была плавной, но не грузить телефон зря.
+  const now = performance.now();
+  if (now - lastPreviewTime >= 1000 / PREVIEW_FPS) {
+    lastPreviewTime = now;
+    try {
+      bgCtx.drawImage(video, 0, 0, w, h);
+      const cols = (mode === 'standard') ? gridCols : voiceCols;
+      const rows = (mode === 'standard') ? gridRows : voiceRows;
+      drawGrid(bgCtx, cols, rows, w, h);
+    } catch(e) {}
+  }
+
+  // Блит готовой картинки на экран — это дешёвая операция, можно на каждом кадре
+  ctx.clearRect(0, 0, w, h);
+  try { ctx.drawImage(bgCanvas, 0, 0); } catch(e) {}
+
+  // Жёлтая подсветка текущего звучащего квадрата
+  if (playState && playState.active && audioCtx) {
+    const elapsed = audioCtx.currentTime - playState.startTime;
+    if (elapsed >= playState.totalDuration) {
+      playState.active = false;
+    } else if (elapsed >= playState.pauseDuration) {
+      drawScanProgress(elapsed);
+    }
+  }
+}
+
+function drawScanProgress(elapsed) {
+  const p = playState;
+  const t = elapsed - p.pauseDuration;
+  const w = canvas.width, h = canvas.height;
+
+  if (p.mode === 'standard') {
+    const totalCells = p.rows * p.cols;
+    const currentFloat = t / p.cellDuration;
+    const current = Math.min(totalCells - 1, Math.max(0, Math.floor(currentFloat)));
+    const cw = w / p.cols, ch = h / p.rows;
+
+    // Хвост: пройденные клетки с затуханием
+    for (let c = 0; c <= current; c++) {
+      const row = Math.floor(c / p.cols);
+      const col = c % p.cols;
+      const age = (currentFloat - c) * p.cellDuration;
+      let alpha;
+      if (c === current) alpha = 0.6;
+      else alpha = 0.45 * Math.exp(-age * 30);
+      if (alpha < 0.02) continue;
+
+      ctx.fillStyle = `rgba(255, 235, 59, ${alpha})`;
+      ctx.fillRect(col * cw, row * ch, cw, ch);
+    }
+
+    // Яркая обводка текущей клетки
+    const row = Math.floor(current / p.cols);
+    const col = current % p.cols;
+    const lw = Math.max(2, Math.min(cw, ch) * 0.15);
+    ctx.strokeStyle = '#FFF176';
+    ctx.lineWidth = lw;
+    ctx.strokeRect(col * cw + lw/2, row * ch + lw/2, cw - lw, ch - lw);
+
+  } else {
+    const currentFloat = t / p.colDuration;
+    const current = Math.min(p.cols - 1, Math.max(0, Math.floor(currentFloat)));
+    const cw = w / p.cols;
+
+    for (let c = 0; c <= current; c++) {
+      const age = (currentFloat - c) * p.colDuration;
+      let alpha;
+      if (c === current) alpha = 0.55;
+      else alpha = 0.4 * Math.exp(-age * 3);
+      if (alpha < 0.02) continue;
+
+      ctx.fillStyle = `rgba(255, 235, 59, ${alpha})`;
+      ctx.fillRect(c * cw, 0, cw, h);
+    }
+  }
+}
+
+// ========== ВСПОМОГАТЕЛЬНОЕ ==========
+function drawGrid(targetCtx, cols, rows, w, h) {
   const cellW = w / cols, cellH = h / rows;
-  ctx.strokeStyle = '#00FF00'; ctx.lineWidth = 2;
-  for (let i = 1; i < cols; i++) { const x = Math.floor(i * cellW); ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
-  for (let i = 1; i < rows; i++) { const y = Math.floor(i * cellH); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+  targetCtx.strokeStyle = '#00FF00';
+  targetCtx.lineWidth = 2;
+  for (let i = 1; i < cols; i++) {
+    const x = Math.floor(i * cellW);
+    targetCtx.beginPath(); targetCtx.moveTo(x, 0); targetCtx.lineTo(x, h); targetCtx.stroke();
+  }
+  for (let i = 1; i < rows; i++) {
+    const y = Math.floor(i * cellH);
+    targetCtx.beginPath(); targetCtx.moveTo(0, y); targetCtx.lineTo(w, y); targetCtx.stroke();
+  }
 }
 
 function pianoSample(t, freq) {
@@ -470,14 +589,41 @@ function pianoSample(t, freq) {
   return (s1 + s2 + s3) / 1.75;
 }
 
+// Снимок яркости по клеткам сетки через уменьшенный канвас — быстро даже на слабом телефоне
+function sampleCells(cols, rows) {
+  if (smallCanvas.width !== cols || smallCanvas.height !== rows) {
+    smallCanvas.width = cols;
+    smallCanvas.height = rows;
+    smallCtx.imageSmoothingEnabled = true;
+    smallCtx.imageSmoothingQuality = 'high';
+  }
+  smallCtx.drawImage(video, 0, 0, cols, rows);
+  const data = smallCtx.getImageData(0, 0, cols, rows).data;
+
+  const cells = [];
+  for (let row = 0; row < rows; row++) {
+    cells[row] = [];
+    for (let col = 0; col < cols; col++) {
+      const i = (row * cols + col) * 4;
+      let bright = (data[i] + data[i+1] + data[i+2]) / 3;
+      if (invertMode) bright = 255 - bright;
+      cells[row][col] = bright;
+    }
+  }
+  return cells;
+}
+
+// ========== СТАНДАРТНЫЙ РЕЖИМ ==========
 function processStandard() {
   if (!running || !audioCtx) return;
   isProcessing = true;
-  const w = canvas.width, h = canvas.height;
-  ctx.drawImage(video, 0, 0, w, h);
-  const imgData = ctx.getImageData(0, 0, w, h);
-  const pixels = imgData.data;
-  drawGrid(gridCols, gridRows);
+
+  const cells = sampleCells(gridCols, gridRows);
+
+  let totalBright = 0, brightCnt = 0;
+  for (let r = 0; r < gridRows; r++)
+    for (let c = 0; c < gridCols; c++) { totalBright += cells[r][c]; brightCnt++; }
+  vibrateByBrightness(totalBright / brightCnt);
 
   const frameDuration = 1 / fps;
   let pauseDuration = framePause ? STD_PAUSE : 0;
@@ -491,58 +637,35 @@ function processStandard() {
   const buffer = new Float32Array(totalSamples);
   let idx = pauseSamples;
 
-  const cellW = Math.floor(w / gridCols), cellH = Math.floor(h / gridRows);
-  let cells = [];
-  for (let row = 0; row < gridRows; row++) {
-    cells[row] = [];
-    const y1 = row * cellH, y2 = (row === gridRows-1) ? h : y1+cellH;
-    for (let col = 0; col < gridCols; col++) {
-      const x1 = col * cellW, x2 = (col === gridCols-1) ? w : x1+cellW;
-      let sum = 0, cnt = 0;
-      for (let y = y1; y < y2; y++) {
-        for (let x = x1; x < x2; x++) {
-          const i = (y*w + x)*4;
-          let bright = (pixels[i] + pixels[i+1] + pixels[i+2]) / 3;
-          if (invertMode) bright = 255 - bright;
-          sum += bright; cnt++;
-        }
-      }
-      cells[row][col] = sum / cnt;
-    }
-  }
-
-  let totalBright = 0, brightCnt = 0;
-  for (let row = 0; row < gridRows; row++) {
-    for (let col = 0; col < gridCols; col++) {
-      totalBright += cells[row][col];
-      brightCnt++;
-    }
-  }
-  vibrateByBrightness(totalBright / brightCnt);
-
   const attack = Math.max(1, Math.floor(0.0005 * SAMPLE_RATE));
   const release = Math.max(1, Math.floor(0.001 * SAMPLE_RATE));
+
   for (let row = 0; row < gridRows; row++) {
     for (let col = 0; col < gridCols; col++) {
       let val;
       if (colorMode || analysisMode === 'brightness') val = cells[row][col];
       else {
-        val = (col === 0) ? Math.abs(cells[row][0] - cells[row][1]) : Math.abs(cells[row][col] - cells[row][col-1]);
+        val = (col === 0)
+          ? Math.abs(cells[row][0] - cells[row][1])
+          : Math.abs(cells[row][col] - cells[row][col-1]);
         val = Math.min(255, val * 2);
       }
 
       if (val < STD_BRIGHT_MIN) {
-        for (let i = 0; i < samplesPerCell; i++) buffer[idx++] = (Math.random()*2-1)*0.02;
+        for (let i = 0; i < samplesPerCell; i++)
+          buffer[idx++] = (Math.random() * 2 - 1) * 0.02;
       } else {
-        let freq = STD_FREQ_BASE + (val/255)*(STD_FREQ_TOP-STD_FREQ_BASE);
-        if (spatialEnabled) freq = Math.min(freq + (col/(gridCols-1))*400, STD_FREQ_TOP+400);
-        const vol = (val/255)*STD_VOL;
+        let freq = STD_FREQ_BASE + (val / 255) * (STD_FREQ_TOP - STD_FREQ_BASE);
+        if (spatialEnabled)
+          freq = Math.min(freq + (col / (gridCols - 1 || 1)) * 400, STD_FREQ_TOP + 400);
+        const vol = (val / 255) * STD_VOL;
         for (let i = 0; i < samplesPerCell; i++) {
-          const t = i/SAMPLE_RATE;
-          let s = (timbre === 'piano') ? pianoSample(t, freq) : Math.sin(2*Math.PI*freq*t);
-          if (i < attack) s *= i/attack;
-          else if (i >= samplesPerCell - release) s *= 1 - (i - (samplesPerCell - release))/release;
-          buffer[idx++] = s*vol*0.8;
+          const t = i / SAMPLE_RATE;
+          let s = (timbre === 'piano') ? pianoSample(t, freq) : Math.sin(2 * Math.PI * freq * t);
+          if (i < attack) s *= i / attack;
+          else if (i >= samplesPerCell - release)
+            s *= 1 - (i - (samplesPerCell - release)) / release;
+          buffer[idx++] = s * vol * 0.8;
         }
       }
     }
@@ -551,60 +674,54 @@ function processStandard() {
   const audioBuffer = audioCtx.createBuffer(1, totalSamples, SAMPLE_RATE);
   audioBuffer.getChannelData(0).set(buffer);
   const source = audioCtx.createBufferSource();
-  source.buffer = audioBuffer; source.connect(audioCtx.destination);
-  source.start(audioCtx.currentTime + 0.001);
+  source.buffer = audioBuffer;
+  source.connect(audioCtx.destination);
+
+  if (activeSource) { try { activeSource.stop(); } catch(e) {} }
+  const startAt = audioCtx.currentTime + 0.01;
+  source.start(startAt);
+  activeSource = source;
+  source.onended = () => { if (activeSource === source) activeSource = null; };
+
+  playState = {
+    active: true,
+    mode: 'standard',
+    startTime: startAt,
+    totalDuration: totalSamples / SAMPLE_RATE,
+    pauseDuration: pauseSamples / SAMPLE_RATE,
+    cols: gridCols,
+    rows: gridRows,
+    rowDuration: samplesPerRow / SAMPLE_RATE,
+    cellDuration: samplesPerCell / SAMPLE_RATE
+  };
+
   isProcessing = false;
 }
 
+// ========== vOICe РЕЖИМ ==========
 function processVOICE() {
   if (!running || !audioCtx) return;
   isProcessing = true;
-  const w = canvas.width, h = canvas.height;
-  ctx.drawImage(video, 0, 0, w, h);
-  const imgData = ctx.getImageData(0, 0, w, h);
-  const pixels = imgData.data;
-  drawGrid(voiceCols, voiceRows);
+
+  const cells = sampleCells(voiceCols, voiceRows);
+
+  let totalBright = 0, brightCnt = 0;
+  for (let r = 0; r < voiceRows; r++)
+    for (let c = 0; c < voiceCols; c++) { totalBright += cells[r][c]; brightCnt++; }
+  vibrateByBrightness(totalBright / brightCnt);
 
   const frameDuration = 1.0;
   const pauseSamples = Math.floor(SAMPLE_RATE * Math.min(VOICE_PAUSE, frameDuration * 0.2));
-  const usefulTime = frameDuration - VOICE_PAUSE;
+  const actualPause = pauseSamples / SAMPLE_RATE;
+  const usefulTime = frameDuration - actualPause;
   const colDuration = usefulTime / voiceCols;
   const samplesPerCol = Math.floor(SAMPLE_RATE * colDuration);
   const totalSamples = pauseSamples + voiceCols * samplesPerCol;
   const buffer = new Float32Array(totalSamples);
   let idx = pauseSamples;
 
-  const cellW = Math.floor(w / voiceCols), cellH = Math.floor(h / voiceRows);
-  let cells = [];
-  for (let row = 0; row < voiceRows; row++) {
-    cells[row] = [];
-    const y1 = row * cellH, y2 = (row === voiceRows-1) ? h : y1+cellH;
-    for (let col = 0; col < voiceCols; col++) {
-      const x1 = col * cellW, x2 = (col === voiceCols-1) ? w : x1+cellW;
-      let sum = 0, cnt = 0;
-      for (let y = y1; y < y2; y++) {
-        for (let x = x1; x < x2; x++) {
-          const i = (y*w + x)*4;
-          let bright = (pixels[i] + pixels[i+1] + pixels[i+2]) / 3;
-          if (invertMode) bright = 255 - bright;
-          sum += bright; cnt++;
-        }
-      }
-      cells[row][col] = sum / cnt;
-    }
-  }
-
-  let totalBright = 0, brightCnt = 0;
-  for (let row = 0; row < voiceRows; row++) {
-    for (let col = 0; col < voiceCols; col++) {
-      totalBright += cells[row][col];
-      brightCnt++;
-    }
-  }
-  vibrateByBrightness(totalBright / brightCnt);
-
-  const rowFreqs = Array.from({length: voiceRows}, (_, r) =>
-    VOICE_FREQ_MIN + (VOICE_FREQ_MAX - VOICE_FREQ_MIN) * (r / (voiceRows-1))
+  const rowFreqs = Array.from({ length: voiceRows }, (_, r) =>
+    VOICE_FREQ_MIN + (VOICE_FREQ_MAX - VOICE_FREQ_MIN) * (r / (voiceRows - 1 || 1))
   );
 
   for (let col = 0; col < voiceCols; col++) {
@@ -618,7 +735,7 @@ function processVOICE() {
         const amp = (bright / 255) * VOICE_VOL / voiceRows;
         sample += Math.sin(2 * Math.PI * rowFreqs[row] * t) * amp;
       }
-      const fade = Math.min(30, samplesPerCol/4);
+      const fade = Math.min(30, samplesPerCol / 4);
       let envelope = 1;
       if (i < fade) envelope = i / fade;
       else if (i >= samplesPerCol - fade) envelope = (samplesPerCol - i) / fade;
@@ -630,20 +747,36 @@ function processVOICE() {
   const audioBuffer = audioCtx.createBuffer(1, totalSamples, SAMPLE_RATE);
   audioBuffer.getChannelData(0).set(buffer);
   const source = audioCtx.createBufferSource();
-  source.buffer = audioBuffer; source.connect(audioCtx.destination);
-  source.start(audioCtx.currentTime + 0.001);
+  source.buffer = audioBuffer;
+  source.connect(audioCtx.destination);
+
+  if (activeSource) { try { activeSource.stop(); } catch(e) {} }
+  const startAt = audioCtx.currentTime + 0.01;
+  source.start(startAt);
+  activeSource = source;
+  source.onended = () => { if (activeSource === source) activeSource = null; };
+
+  playState = {
+    active: true,
+    mode: 'voice',
+    startTime: startAt,
+    totalDuration: totalSamples / SAMPLE_RATE,
+    pauseDuration: actualPause,
+    cols: voiceCols,
+    rows: voiceRows,
+    colDuration: samplesPerCol / SAMPLE_RATE
+  };
+
   isProcessing = false;
 }
 
+// ========== ИНИЦИАЛИЗАЦИЯ ==========
 window.addEventListener('load', () => {
-  setTimeout(() => {
-    startBtn.focus();
-  }, 500);
+  setTimeout(() => { startBtn.focus(); }, 500);
 });
 
 loadSettings();
 applyPreset(currentPreset);
-window.addEventListener('beforeunload', () => fullStop());
 </script>
 </body>
 </html>
