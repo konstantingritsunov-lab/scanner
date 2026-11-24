@@ -113,47 +113,12 @@
 <canvas id="cnv"></canvas>
 
 <div id="bottomControls">
-  <button id="stopBtn" class="stop-btn" aria-label="Остановить и выключить камеру">⏹ Стоп</button>
   <button id="invertBtn" aria-label="Переключить инверсию">🔄 Инверсия: ВЫКЛ</button>
   <button id="voiceBtn" class="voice-btn" aria-label="Голосовая команда">🎤 Голосовая команда</button>
+  <button id="stopBtn" class="stop-btn" aria-label="Остановить и выключить камеру">⏹ Стоп</button>
 </div>
 
 <script>
-// ==========================================================
-// !!! ДОБАВЛЕНО ДЛЯ РАБОТЫ КАМЕРЫ В MEDIAN.CO / WEBVIEW !!!
-// ==========================================================
-
-// 1. Запасной вариант для старых версий WebView
-if (navigator.mediaDevices === undefined) {
-  navigator.mediaDevices = {};
-}
-if (navigator.mediaDevices.getUserMedia === undefined) {
-  navigator.mediaDevices.getUserMedia = function(constraints) {
-    var getUserMedia = navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
-    if (!getUserMedia) {
-      return Promise.reject(new Error('getUserMedia не поддерживается в этом WebView'));
-    }
-    return new Promise(function(resolve, reject) {
-      getUserMedia.call(navigator, constraints, resolve, reject);
-    });
-  };
-}
-
-// 2. Запрос разрешения через встроенный мост Median.co
-function requestMedianCameraPermission() {
-  return new Promise((resolve) => {
-    if (window.median && window.median.permissions && typeof window.median.permissions.request === 'function') {
-      window.median.permissions.request('camera')
-        .then(() => resolve(true))
-        .catch(() => resolve(false));
-    } else {
-      // Если моста нет, просто идем дальше
-      resolve(false); 
-    }
-  });
-}
-// ==========================================================
-
 // ========== НАСТРОЙКИ И СОХРАНЕНИЕ ==========
 const SETTINGS_KEY = 'sound_scanner_settings_v2';
 
@@ -189,6 +154,7 @@ function saveSettings() {
 let mode = 'standard';
 let currentPreset = 'medium';
 
+// скорость звука по умолчанию — 1 кадр/с (для слабых телефонов)
 let gridCols = 10, gridRows = 10, fps = 1;
 let colorMode = false, framePause = true, spatialEnabled = true;
 let analysisMode = 'brightness';
@@ -205,6 +171,7 @@ const STD_PAUSE = 0.1;
 const SAMPLE_RATE = 44100;
 const FRAME_SAFETY = 0.95;
 
+// Превью (видео-картинка) обновляется независимо от звука — плавно, ~15 раз/сек
 const PREVIEW_FPS = 15;
 let lastPreviewTime = 0;
 
@@ -214,13 +181,16 @@ let activeSource = null;
 let playState = null;
 let advancedOpen = false;
 
+// DOM
 const video = document.getElementById('vid');
 const canvas = document.getElementById('cnv');
 const ctx = canvas.getContext('2d');
 
+// Оффскрин: сюда кладём видео + сетку для показа
 const bgCanvas = document.createElement('canvas');
 const bgCtx = bgCanvas.getContext('2d', { willReadFrequently: false });
 
+// Оффскрин для БЫСТРОГО анализа: уменьшаем видео сразу до размера сетки
 const smallCanvas = document.createElement('canvas');
 const smallCtx = smallCanvas.getContext('2d', { willReadFrequently: true });
 smallCtx.imageSmoothingEnabled = true;
@@ -466,9 +436,6 @@ startBtn.addEventListener('click', async () => {
   if (audioCtx.state === 'suspended') await audioCtx.resume();
 
   try {
-    // !!! ВЫЗОВ РАЗРЕШЕНИЯ ЧЕРЕЗ МОСТ MEDIAN !!!
-    await requestMedianCameraPermission();
-
     stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'environment', width: { ideal: 320 }, height: { ideal: 240 } },
       audio: false
@@ -476,9 +443,7 @@ startBtn.addEventListener('click', async () => {
     video.srcObject = stream;
     await video.play();
   } catch(e) {
-    // Понятная инструкция для незрячего пользователя
-    alert('Камера не включена. Если на экране есть окошко с вопросом про камеру — нажмите "Разрешить". Если окошка нет, зайдите в настройки телефона, найдите это приложение и разрешите ему доступ к камере.');
-    console.error('Ошибка камеры:', e);
+    alert('Нет доступа к камере');
     fullStop();
     return;
   }
@@ -507,6 +472,8 @@ video.addEventListener('loadedmetadata', () => {
 });
 
 // ========== ЦИКЛ ОТРИСОВКИ ==========
+// Превью (видео + сетка) обновляется PREVIEW_FPS раз в секунду — НЕЗАВИСИМО от звука.
+// Подсветка текущей клетки — на каждом кадре экрана (60fps), плавно.
 function startRenderLoop() {
   if (rafId) return;
   const loop = () => {
@@ -521,6 +488,8 @@ function renderFrame() {
   const w = canvas.width, h = canvas.height;
   if (!w || !h) return;
 
+  // Обновляем «фотографию» видео в bgCanvas только PREVIEW_FPS раз/сек — этого достаточно,
+  // чтобы картинка была плавной, но не грузить телефон зря.
   const now = performance.now();
   if (now - lastPreviewTime >= 1000 / PREVIEW_FPS) {
     lastPreviewTime = now;
@@ -532,9 +501,11 @@ function renderFrame() {
     } catch(e) {}
   }
 
+  // Блит готовой картинки на экран — это дешёвая операция, можно на каждом кадре
   ctx.clearRect(0, 0, w, h);
   try { ctx.drawImage(bgCanvas, 0, 0); } catch(e) {}
 
+  // Жёлтая подсветка текущего звучащего квадрата
   if (playState && playState.active && audioCtx) {
     const elapsed = audioCtx.currentTime - playState.startTime;
     if (elapsed >= playState.totalDuration) {
@@ -556,6 +527,7 @@ function drawScanProgress(elapsed) {
     const current = Math.min(totalCells - 1, Math.max(0, Math.floor(currentFloat)));
     const cw = w / p.cols, ch = h / p.rows;
 
+    // Хвост: пройденные клетки с затуханием
     for (let c = 0; c <= current; c++) {
       const row = Math.floor(c / p.cols);
       const col = c % p.cols;
@@ -569,6 +541,7 @@ function drawScanProgress(elapsed) {
       ctx.fillRect(col * cw, row * ch, cw, ch);
     }
 
+    // Яркая обводка текущей клетки
     const row = Math.floor(current / p.cols);
     const col = current % p.cols;
     const lw = Math.max(2, Math.min(cw, ch) * 0.15);
@@ -616,6 +589,7 @@ function pianoSample(t, freq) {
   return (s1 + s2 + s3) / 1.75;
 }
 
+// Снимок яркости по клеткам сетки через уменьшенный канвас — быстро даже на слабом телефоне
 function sampleCells(cols, rows) {
   if (smallCanvas.width !== cols || smallCanvas.height !== rows) {
     smallCanvas.width = cols;
