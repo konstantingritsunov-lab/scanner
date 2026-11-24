@@ -10,7 +10,10 @@
     margin: 0; background: #000; font-family: sans-serif; color: #fff;
     min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
   }
-  video { display: none; }
+  video {
+    position: fixed; top: 0; left: 0; width: 1px; height: 1px;
+    opacity: 0; pointer-events: none; z-index: -1;
+  }
   canvas { display: block; width: 100vw; height: auto; max-height: 75vh; }
   .settings-panel {
     display: flex; flex-direction: column; align-items: center; gap: 0.8em;
@@ -113,12 +116,82 @@
 <canvas id="cnv"></canvas>
 
 <div id="bottomControls">
+  <button id="stopBtn" class="stop-btn" aria-label="Остановить и выключить камеру">⏹ Стоп</button>
   <button id="invertBtn" aria-label="Переключить инверсию">🔄 Инверсия: ВЫКЛ</button>
   <button id="voiceBtn" class="voice-btn" aria-label="Голосовая команда">🎤 Голосовая команда</button>
-  <button id="stopBtn" class="stop-btn" aria-label="Остановить и выключить камеру">⏹ Стоп</button>
 </div>
 
 <script>
+// ========== ПОДКЛЮЧЕНИЕ КАМЕРЫ ДЛЯ MEDIAN.CO / ANDROID WEBVIEW ==========
+if (!navigator.mediaDevices) {
+  navigator.mediaDevices = {};
+}
+if (!navigator.mediaDevices.getUserMedia) {
+  navigator.mediaDevices.getUserMedia = function(constraints) {
+    const legacyGetUserMedia = navigator.webkitGetUserMedia || navigator.mozGetUserMedia;
+    if (!legacyGetUserMedia) {
+      return Promise.reject(new Error('API камеры не поддерживается в данном WebView'));
+    }
+    return new Promise((resolve, reject) => {
+      legacyGetUserMedia.call(navigator, constraints, resolve, reject);
+    });
+  };
+}
+
+async function openCameraStream() {
+  const attempts = [
+    { video: { facingMode: { ideal: 'environment' } }, audio: false },
+    { video: { facingMode: 'environment' }, audio: false },
+    { video: true, audio: false }
+  ];
+
+  let lastError = null;
+  for (const constraints of attempts) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (err) {
+      lastError = err;
+      if (err && (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError')) {
+        throw err;
+      }
+    }
+  }
+  throw lastError || new Error('Не удалось получить видеопоток');
+}
+
+function attachAndPlayVideo(videoEl, mediaStream) {
+  return new Promise((resolve) => {
+    videoEl.setAttribute('playsinline', '');
+    videoEl.setAttribute('muted', '');
+    videoEl.muted = true;
+    videoEl.srcObject = mediaStream;
+
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+
+    const onReady = () => {
+      const p = videoEl.play();
+      if (p && typeof p.then === 'function') {
+        p.then(finish).catch(() => setTimeout(finish, 150));
+      } else {
+        finish();
+      }
+    };
+
+    if (videoEl.readyState >= 1) {
+      onReady();
+    } else {
+      videoEl.addEventListener('loadedmetadata', onReady, { once: true });
+      setTimeout(() => { if (!settled) onReady(); }, 1000);
+    }
+  });
+}
+// ==========================================================
+
 // ========== НАСТРОЙКИ И СОХРАНЕНИЕ ==========
 const SETTINGS_KEY = 'sound_scanner_settings_v2';
 
@@ -154,7 +227,6 @@ function saveSettings() {
 let mode = 'standard';
 let currentPreset = 'medium';
 
-// скорость звука по умолчанию — 1 кадр/с (для слабых телефонов)
 let gridCols = 10, gridRows = 10, fps = 1;
 let colorMode = false, framePause = true, spatialEnabled = true;
 let analysisMode = 'brightness';
@@ -171,7 +243,6 @@ const STD_PAUSE = 0.1;
 const SAMPLE_RATE = 44100;
 const FRAME_SAFETY = 0.95;
 
-// Превью (видео-картинка) обновляется независимо от звука — плавно, ~15 раз/сек
 const PREVIEW_FPS = 15;
 let lastPreviewTime = 0;
 
@@ -181,16 +252,13 @@ let activeSource = null;
 let playState = null;
 let advancedOpen = false;
 
-// DOM
 const video = document.getElementById('vid');
 const canvas = document.getElementById('cnv');
 const ctx = canvas.getContext('2d');
 
-// Оффскрин: сюда кладём видео + сетку для показа
 const bgCanvas = document.createElement('canvas');
 const bgCtx = bgCanvas.getContext('2d', { willReadFrequently: false });
 
-// Оффскрин для БЫСТРОГО анализа: уменьшаем видео сразу до размера сетки
 const smallCanvas = document.createElement('canvas');
 const smallCtx = smallCanvas.getContext('2d', { willReadFrequently: true });
 smallCtx.imageSmoothingEnabled = true;
@@ -423,7 +491,6 @@ timbreBtn.addEventListener('click', () => {
   timbre = timbre === 'sine' ? 'piano' : 'sine';
   updateUI(); saveSettings();
 });
-
 // ========== ЗАПУСК ==========
 startBtn.addEventListener('click', async () => {
   if (running) return;
@@ -432,21 +499,42 @@ startBtn.addEventListener('click', async () => {
   bottomControls.style.display = 'flex';
   canvas.style.display = 'block';
 
-  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  if (audioCtx.state === 'suspended') await audioCtx.resume();
-
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'environment', width: { ideal: 320 }, height: { ideal: 240 } },
-      audio: false
-    });
-    video.srcObject = stream;
-    await video.play();
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+
+    stream = await openCameraStream();
+    await attachAndPlayVideo(video, stream);
   } catch(e) {
-    alert('Нет доступа к камере');
-    fullStop();
+    console.error('Ошибка камеры:', e);
+    const errReason = (e && e.name) ? ` (${e.name})` : '';
+    const isMedian = navigator.userAgent.toLowerCase().includes('median') ||
+                     navigator.userAgent.toLowerCase().includes('gonative') ||
+                     (window.median && window.median.open);
+
+    if (isMedian && window.median && window.median.open && typeof window.median.open.appSettings === 'function') {
+      const openSettings = confirm(
+        `Камера не включена${errReason}. Если на экране есть запрос на доступ к камере — нажмите "Разрешить".\n\nНажмите ОК, чтобы сразу открыть настройки приложения и разрешить доступ к камере.`
+      );
+      fullStop();
+      if (openSettings) {
+        try { window.median.open.appSettings(); } catch(err) {}
+      }
+    } else {
+      alert(
+        `Камера не включена${errReason}. Если на экране есть окошко с вопросом про камеру — нажмите "Разрешить". Если окошка нет, зайдите в настройки телефона, найдите это приложение и разрешите ему доступ к камере.`
+      );
+      fullStop();
+    }
     return;
   }
+
+  const w = video.videoWidth || 320;
+  const h = video.videoHeight || 240;
+  canvas.width = w;
+  canvas.height = h;
+  bgCanvas.width = w;
+  bgCanvas.height = h;
 
   running = true;
   startRenderLoop();
@@ -458,7 +546,6 @@ startBtn.addEventListener('click', async () => {
     }
   }, 1000 / fpsActual);
 });
-
 video.addEventListener('loadedmetadata', () => {
   const w = video.videoWidth  || 320;
   const h = video.videoHeight || 240;
@@ -472,8 +559,6 @@ video.addEventListener('loadedmetadata', () => {
 });
 
 // ========== ЦИКЛ ОТРИСОВКИ ==========
-// Превью (видео + сетка) обновляется PREVIEW_FPS раз в секунду — НЕЗАВИСИМО от звука.
-// Подсветка текущей клетки — на каждом кадре экрана (60fps), плавно.
 function startRenderLoop() {
   if (rafId) return;
   const loop = () => {
@@ -488,8 +573,6 @@ function renderFrame() {
   const w = canvas.width, h = canvas.height;
   if (!w || !h) return;
 
-  // Обновляем «фотографию» видео в bgCanvas только PREVIEW_FPS раз/сек — этого достаточно,
-  // чтобы картинка была плавной, но не грузить телефон зря.
   const now = performance.now();
   if (now - lastPreviewTime >= 1000 / PREVIEW_FPS) {
     lastPreviewTime = now;
@@ -501,11 +584,9 @@ function renderFrame() {
     } catch(e) {}
   }
 
-  // Блит готовой картинки на экран — это дешёвая операция, можно на каждом кадре
   ctx.clearRect(0, 0, w, h);
   try { ctx.drawImage(bgCanvas, 0, 0); } catch(e) {}
 
-  // Жёлтая подсветка текущего звучащего квадрата
   if (playState && playState.active && audioCtx) {
     const elapsed = audioCtx.currentTime - playState.startTime;
     if (elapsed >= playState.totalDuration) {
@@ -527,7 +608,6 @@ function drawScanProgress(elapsed) {
     const current = Math.min(totalCells - 1, Math.max(0, Math.floor(currentFloat)));
     const cw = w / p.cols, ch = h / p.rows;
 
-    // Хвост: пройденные клетки с затуханием
     for (let c = 0; c <= current; c++) {
       const row = Math.floor(c / p.cols);
       const col = c % p.cols;
@@ -541,7 +621,6 @@ function drawScanProgress(elapsed) {
       ctx.fillRect(col * cw, row * ch, cw, ch);
     }
 
-    // Яркая обводка текущей клетки
     const row = Math.floor(current / p.cols);
     const col = current % p.cols;
     const lw = Math.max(2, Math.min(cw, ch) * 0.15);
@@ -589,7 +668,6 @@ function pianoSample(t, freq) {
   return (s1 + s2 + s3) / 1.75;
 }
 
-// Снимок яркости по клеткам сетки через уменьшенный канвас — быстро даже на слабом телефоне
 function sampleCells(cols, rows) {
   if (smallCanvas.width !== cols || smallCanvas.height !== rows) {
     smallCanvas.width = cols;
